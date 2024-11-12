@@ -1,4 +1,8 @@
 #include "systemcalls.h"
+#include <sys/wait.h>
+#include <sys/fcntl.h>
+#include <unistd.h>
+#include <stdlib.h>
 
 /**
  * @param cmd the command to execute with system()
@@ -16,8 +20,32 @@ bool do_system(const char *cmd)
  *   and return a boolean true if the system() call completed with success
  *   or false() if it returned a failure
 */
+    if (cmd == NULL) {
+        fprintf(stderr, "Command is NULL.\n");
+        return false;
+    }
 
-    return true;
+    // Execute the command and check the result
+    int ret = system(cmd);
+    if (ret == -1) {
+        fprintf(stderr, "Error executing command.\n");
+        return false;
+    }
+
+    // Check the exit status of the command
+    if (WIFEXITED(ret)) {
+        int exit_status = WEXITSTATUS(ret);
+        if (exit_status == 0) {
+            printf("Command executed successfully.\n");
+            return true;
+        } else {
+            fprintf(stderr, "Command exited with non-zero status: %d\n", exit_status);
+            return false;
+        }
+    } else {
+        fprintf(stderr, "Command did not exit successfully.\n");
+        return false;
+    }
 }
 
 /**
@@ -59,6 +87,39 @@ bool do_exec(int count, ...)
  *
 */
 
+    pid_t pid = fork();
+
+    if (pid == -1) {
+        fprintf(stderr, "Fork failed.\n");
+        return false;
+    } else if (pid == 0) {
+        // Child process
+        execv(command[0], command);
+        fprintf(stderr, "Execv failed.\n");
+        /* execv returns only on error */
+        exit(EXIT_FAILURE);
+    } else {
+        // Parent process
+        int status;
+        if (waitpid(pid, &status, 0) == -1) {
+            fprintf(stderr, "Wait failed.\n");
+            return false;
+        }
+        if (WIFEXITED(status)) {
+            int exit_status = WEXITSTATUS(status);
+            if (exit_status == 0) {
+                printf("Command executed successfully.\n");
+                return true;
+            } else {
+                fprintf(stderr, "Command exited with non-zero status: %d\n", exit_status);
+                return false;
+            }
+        } else {
+            fprintf(stderr, "Command did not exit successfully.\n");
+            return false;
+        }
+    }
+
     va_end(args);
 
     return true;
@@ -92,6 +153,54 @@ bool do_exec_redirect(const char *outputfile, int count, ...)
  *   The rest of the behaviour is same as do_exec()
  *
 */
+
+    int fd = open(outputfile, O_WRONLY|O_TRUNC|O_CREAT, 0644);
+
+    if (fd < 0) {
+        fprintf(stderr, "Failed to open %s", outputfile);
+        return false;
+    }
+
+    pid_t pid = fork();
+
+    if (pid == -1) {
+        fprintf(stderr, "Fork failed.\n");
+        close(fd);
+        return false;
+    } else if (pid == 0) {
+        // Child process
+        if (dup2(fd, STDOUT_FILENO) == -1) {
+            fprintf(stderr, "Dup2 failed.\n");
+            close(fd);
+            return false;
+        }
+        close(fd);
+        execv(command[0], command);
+        fprintf(stderr, "Exec failed.\n");
+        /* execv returns only on error */
+        exit(EXIT_FAILURE);
+    } else {
+        // Parent process
+        close(fd);
+        int status;
+        if (waitpid(pid, &status, 0) == -1) {
+            fprintf(stderr, "Wait failed.\n");
+            return false;
+        }
+        if (WIFEXITED(status)) {
+            int exit_status = WEXITSTATUS(status);
+            if (exit_status == 0) {
+                printf("Command executed successfully.\n");
+                return true;
+            } else {
+                fprintf(stderr, "Command exited with non-zero status: %d\n", exit_status);
+                return false;
+            }
+        } else {
+            fprintf(stderr, "Command did not exit successfully.\n");
+            return false;
+        }
+    }
 
     va_end(args);
 
